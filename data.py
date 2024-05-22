@@ -13,7 +13,7 @@ DB_PASSWORD = os.environ["DB_PASSWORD"]
 DB_DATABASE = os.environ["DB_DATABASE"]
 
 conn = pymysql.connect(host=DB_HOST,
-                       port=DB_PORT,
+                       port=int(DB_PORT),
                        user=DB_LOGIN,
                        password=DB_PASSWORD)
 
