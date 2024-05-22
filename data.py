@@ -12,9 +12,10 @@ DB_LOGIN = os.environ["DB_LOGIN"]
 DB_PASSWORD = os.environ["DB_PASSWORD"]
 DB_DATABASE = os.environ["DB_DATABASE"]
 
-conn = pymysql.connect(host=f'{DB_HOST}:{DB_PORT}',
-                       user=f'{DB_LOGIN}',
-                       password=f'{DB_PASSWORD}')
+conn = pymysql.connect(host=DB_HOST,
+                       port=DB_PORT,
+                       user=DB_LOGIN,
+                       password=DB_PASSWORD)
 
 with conn:
     with conn.cursor() as cursor:
@@ -23,7 +24,7 @@ with conn:
 
     conn.commit()
 
-engine = create_engine(f"mysql+pymysql://{DB_LOGIN}:{DB_PASSWORD}@{DB_HOST}/{DB_DATABASE}?charset=utf8mb4")
+engine = create_engine(f"mysql+pymysql://{DB_LOGIN}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_DATABASE}?charset=utf8mb4")
 Session = sessionmaker(bind=engine)
 metadata = MetaData()
 mapper_registry = registry()
