@@ -114,41 +114,41 @@ class CatDetectorApp:
             
             path = f'img/{str(owner)}/{cat_name}'
             imgs = []
-            #try:
-            
-            shift = 1
-            if not os.path.exists(path):
-                os.makedirs(path)
-            else:
-                shift = max(map( lambda x: int(x.strip('.jpg').split('_')[-1]) ,
-                        os.listdir(path))) + 1
+            try:
 
-            for file in files:
-                contents = file.file.read()
-                img = np.frombuffer(contents, np.uint8)
-                img = cv2.imdecode(img, cv2.IMREAD_COLOR)               
-                imgs.append(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+                shift = 1
+                if not os.path.exists(path):
+                    os.makedirs(path)
+                else:
+                    shift = max(map( lambda x: int(x.strip('.jpg').split('_')[-1]) ,
+                            os.listdir(path))) + 1
 
-                
-            seg_cats, logs = self.yolo_model.segmentate_cat(imgs)
-            if len(seg_cats) == 0:
-                return {'cat_id' :  'none', 'n_add_img': len(seg_cats) ,'n_all_img': len(seg_cats) + shift - 1, 'error': logs}
-            vecs = self.feature_extractor.cat_to_vec(seg_cats)
-            
-            paths = []
-            for i, img in enumerate(seg_cats):
-                file_path = f'{path}/{cat_name}_{str(i + shift)}.jpg'
-                paths.append(file_path)
-                cv2.imwrite(file_path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
-            
-            catID = data.cat_to_db(vecs, paths, cat_name, owner, is_pet=True)
+                for file in files:
+                    contents = file.file.read()
+                    img = np.frombuffer(contents, np.uint8)
+                    img = cv2.imdecode(img, cv2.IMREAD_COLOR)               
+                    imgs.append(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
 
-            self.nn_model.update_knn(vecs, catID)
-            #except Exception as inst:
-            #    print(inst) 
-            #    return {"Error": str(inst)}
-            #finally:
-            #    file.file.close()
+
+                seg_cats, logs = self.yolo_model.segmentate_cat(imgs)
+                if len(seg_cats) == 0:
+                    return {'cat_id' :  'none', 'n_add_img': len(seg_cats) ,'n_all_img': len(seg_cats) + shift - 1, 'error': logs}
+                vecs = self.feature_extractor.cat_to_vec(seg_cats)
+
+                paths = []
+                for i, img in enumerate(seg_cats):
+                    file_path = f'{path}/{cat_name}_{str(i + shift)}.jpg'
+                    paths.append(file_path)
+                    cv2.imwrite(file_path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+
+                catID = data.cat_to_db(vecs, paths, cat_name, owner, is_pet=True)
+
+                self.nn_model.update_knn(vecs, catID)
+            except Exception as inst:
+                print(inst) 
+                return {"Error": str(inst)}
+            finally:
+                file.file.close()
             return {'cat_id' :  catID, 'n_add_img': len(seg_cats) ,'n_all_img': len(seg_cats) + shift - 1, 'error': logs}
 
         @self.app.post("/check_cat/")
@@ -156,72 +156,77 @@ class CatDetectorApp:
             import time
             elapsed_time = time.time()
             response = {'pass': '0'}
-            #try:
-            contents = file.file.read()
-            img = np.frombuffer(contents, np.uint8)
-            img = cv2.imdecode(img, cv2.IMREAD_COLOR)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            seg_cat, _ = self.yolo_model.segmentate_cat(img)
-            vec_cat = self.feature_extractor.cat_to_vec(seg_cat)
-            
-            dists, ii_closest = self.knn.kneighbors(vec_cat, n_neighbors=self.top_k, return_distance=True)
-            ii_closest += 1
-            with Session() as session: 
-                owner_cat_list = session.query(Owner.id, Cat.id, Cat.is_pet, Cat.name).join(Cat).filter(Owner.chat_id == owner).all()
+            try:
+                contents = file.file.read()
+                img = np.frombuffer(contents, np.uint8)
+                img = cv2.imdecode(img, cv2.IMREAD_COLOR)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                seg_cat, _ = self.yolo_model.segmentate_cat(img)
+
+                if len(seg_cat) == 0:
+                        print({'pass': '0'})
+                        return {'pass': '0'}
+
+                vec_cat = self.feature_extractor.cat_to_vec(seg_cat)
+
+                dists, ii_closest = self.knn.kneighbors(vec_cat, n_neighbors=self.top_k, return_distance=True)
+                ii_closest += 1
+                with Session() as session: 
+                    owner_cat_list = session.query(Owner.id, Cat.id, Cat.is_pet, Cat.name).join(Cat).filter(Owner.chat_id == owner).all()
+
+                    paths_closest = []
+                    catID_closest = []
+                    name_closest = []
+                    for i in ii_closest[0]:
+                        q = session.query(CatData.img, Cat.id, Cat.name).join(Cat).filter(CatData.id == i).first()
+                        paths_closest.append(q[0])
+                        catID_closest.append(q[1])
+                        name_closest.append(q[2])
+                cat_info = {}
+                for i in owner_cat_list:
+                    catID = i[1] 
+                    fc = np.count_nonzero(np.array(catID_closest) == catID)
+                    ac = np.count_nonzero(self.nn_model.labels == catID)
+                    prec = fc / min(ac, self.top_k)
+                    print('catdataclos',ii_closest)
+                    print('catidclos',catID_closest)
+                    print(fc, ac, prec, catID)
+                    cat_info[catID] = prec
+
+                    if prec > conf or response['pass']=='1':
+                        response['pass'] = '1'
+
+                from operator import itemgetter
+                closest_cat = max(cat_info.items(),key=itemgetter(1))
+                response['cat_id'], response['conf'] = map(str, closest_cat)
+                response['nearest_cats'] = json.dumps(catID_closest)
+                px = 1/plt.rcParams['figure.dpi']
+                fig,ax = plt.subplots(1, self.top_k, figsize=(2500*px,500*px))
+                print(name_closest)
+                for j, jj in enumerate(paths_closest):
+                    img = cv2.imread(jj)
+                    img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
+                    ax[j].imshow(img)
+                    ax[j].set_title(name_closest[j])
+                    ax[j].axis('off')
+
+                buf = io.BytesIO()
+                plt.savefig(buf, format='png')
+                buf.seek(0)
                 
-                paths_closest = []
-                catID_closest = []
-                name_closest = []
-                for i in ii_closest[0]:
-                    q = session.query(CatData.img, Cat.id, Cat.name).join(Cat).filter(CatData.id == i).first()
-                    paths_closest.append(q[0])
-                    catID_closest.append(q[1])
-                    name_closest.append(q[2])
-            cat_info = {}
-            for i in owner_cat_list:
-                catID = i[1] 
-                fc = np.count_nonzero(np.array(catID_closest) == catID)
-                ac = np.count_nonzero(self.nn_model.labels == catID)
-                prec = fc / min(ac, self.top_k)
-                print('catdataclos',ii_closest)
-                print('catidclos',catID_closest)
-                print(fc, ac, prec, catID)
-                cat_info[catID] = prec
-            
-                if prec > conf or response['pass']=='1':
-                    response['pass'] = '1'
-                    
-            from operator import itemgetter
-            closest_cat = max(cat_info.items(),key=itemgetter(1))
-            response['cat_id'], response['conf'] = map(str, closest_cat)
-            response['nearest_cats'] = json.dumps(catID_closest)
-            px = 1/plt.rcParams['figure.dpi']
-            fig,ax = plt.subplots(1, self.top_k, figsize=(2500*px,500*px))
-            print(name_closest)
-            for j, jj in enumerate(paths_closest):
-                img = cv2.imread(jj)
-                img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
-                ax[j].imshow(img)
-                ax[j].set_title(name_closest[j])
-                ax[j].axis('off')
-
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png')
-            buf.seek(0)
-            if debug:
-                pass
-
-            #except Exception as inst:
-            #    print(inst) 
-            #    return {"error": str(inst)}
-            #finally:
-            #    file.file.close()
+            except Exception as inst:
+                print(inst) 
+                return {"error": str(inst)}
+            finally:
+                file.file.close()
 
             elapsed_time = int((time.time() - elapsed_time)*1000)
             response['time'] = str(elapsed_time) 
             print(f"time: {elapsed_time} ms")
-            print(json.dumps(response))
-            return Response(content=buf.getvalue(), headers=response, media_type="image/png")
+            if debug:
+                return Response(content=buf.getvalue(), headers=response, media_type="image/png")
+            else:
+                return {'pass': response['pass']}
 
         import uvicorn
         uvicorn.run(self.app, host="0.0.0.0", port=8080)
