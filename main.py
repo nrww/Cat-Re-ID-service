@@ -172,7 +172,7 @@ class CatDetectorApp:
                 dists, ii_closest = self.knn.kneighbors(vec_cat, n_neighbors=self.top_k, return_distance=True)
                 ii_closest += 1
                 with Session() as session: 
-                    owner_cat_list = session.query(Owner.id, Cat.id, Cat.is_pet, Cat.name).join(Cat).filter(Owner.chat_id == owner).all()
+                    owner_cat_list = session.query(Owner.id, Cat.id, Cat.is_pet, Cat.name).join(Cat).filter(Owner.id == owner).all()
 
                     paths_closest = []
                     catID_closest = []
